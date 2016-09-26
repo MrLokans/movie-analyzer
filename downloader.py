@@ -6,7 +6,7 @@ import motor.motor_asyncio
 
 OMDB_URL = 'https://www.omdbapi.com/'
 IMDB_MAX_DIGITS = 7
-MAX_CONCURRENT_CONNECTIONS = 5
+MAX_CONCURRENT_CONNECTIONS = 10
 
 logging.basicConfig(level=logging.INFO)
 
@@ -30,8 +30,10 @@ class MovieData(object):
         self.type = type
         self.metascore = metascore
         if not imdbid:
-            raise ValueError("No imdb id present")
-        self.imdbid = imdbid
+            self.imdbid = "unknown"
+            logging.info("Unknown imbid for movie: {}".format(str(self)))
+        else:
+            self.imdbid = imdbid
 
     @classmethod
     def from_dict(cls, d):
@@ -43,19 +45,18 @@ class MovieData(object):
 
     def __repr__(self):
         s = "MovieData(title='{}', year='{}', imdbid='{}')"
-        return s.format(self.title.decode('utf-8'),
-                        self.year.decode('utf-8'),
-                        self.imdbid.decode('utf-8'))
+        return s.format(self.title.encode('utf-8').decode('utf-8', errors='replace'),
+                        self.year.encode('utf-8').decode('utf-8', errors='replace'),
+                        self.imdbid.encode('utf-8').decode('utf-8', errors='replace'))
 
 
 async def get_movie_by_id(session, movie_id, semaphore):
-    semaphore.acquire()
+    # semaphore.acquire()
     imdb_id = generate_imdb_id_from_number(movie_id)
     search_response = await _get_movie_response(session, imdb_id)
-    semaphore.release()
-    if search_response.status_code == '200':
-        return None
-    return MovieData.from_dict(search_response.json())
+    # semaphore.release()
+    json_movie = await search_response.json()
+    return MovieData.from_dict(json_movie)
 
 
 async def _get_movie_response(session, imdb_id):
@@ -77,17 +78,18 @@ def generate_imdb_id_from_number(number):
 
 async def insert_movie_into_collection(collection, movie):
     movie_present = await collection.find_one({'imdbid': movie.imdbid})
-    if movie_present:
+    if movie_present and movie.imdbid != 'unknown':
         logging.info('Movie is already in the database.')
         return
     else:
-        await collection.insert_one(movie.to_dict())
+        await collection.insert(movie.to_dict())
 
 
 async def download_movies_data(loop, collection, semaphore):
     currently_parsed_movies = await collection.find().count()
     async with aiohttp.ClientSession(loop=loop) as session:
-        for movie_id in range(currently_parsed_movies, currently_parsed_movies + 10):
+        for movie_id in range(currently_parsed_movies,
+                              currently_parsed_movies + 1000):
             m = await get_movie_by_id(session, movie_id, semaphore)
             await insert_movie_into_collection(collection, m)
 
@@ -97,7 +99,6 @@ def main():
 
     movies_db = client.movies_db
     movies_collection = movies_db.movies_collection
-
 
     loop = asyncio.get_event_loop()
     semaphore = asyncio.Semaphore(value=MAX_CONCURRENT_CONNECTIONS, loop=loop)
