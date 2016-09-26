@@ -1,17 +1,24 @@
-import requests
+import logging
 
-OMDB_URL = 'http://www.omdbapi.com/'
+import aiohttp
+import asyncio
+import motor.motor_asyncio
+
+OMDB_URL = 'https://www.omdbapi.com/'
 IMDB_MAX_DIGITS = 7
+MAX_CONCURRENT_CONNECTIONS = 5
+
+logging.basicConfig(level=logging.INFO)
 
 
 class MovieData(object):
 
-    __slots__ = ('title', 'year', 'released', 'runtime', 'genre',
+    __slots__ = ('title', 'year', 'released', 'runtime', 'genre', 'imdbid',
                  'director', 'plot', 'language', 'type', 'metascore')
 
     def __init__(self, title="", year="", released="",
                  runtime="", genre="", director="", plot="", language="",
-                 type="", metascore="", **kwargs):
+                 type="", metascore="", imdbid="", **kwargs):
         self.title = title
         self.year = year
         self.released = released
@@ -22,6 +29,9 @@ class MovieData(object):
         self.language = language
         self.type = type
         self.metascore = metascore
+        if not imdbid:
+            raise ValueError("No imdb id present")
+        self.imdbid = imdbid
 
     @classmethod
     def from_dict(cls, d):
@@ -32,20 +42,25 @@ class MovieData(object):
         return {s: getattr(self, s) for s in self.__slots__}
 
     def __repr__(self):
-        return "MovieData(title='{}', year='{}')".format(self.title, self.year)
+        s = "MovieData(title='{}', year='{}', imdbid='{}')"
+        return s.format(self.title.decode('utf-8'),
+                        self.year.decode('utf-8'),
+                        self.imdbid.decode('utf-8'))
 
 
-def get_movie_by_id(movie_id):
+async def get_movie_by_id(session, movie_id, semaphore):
+    semaphore.acquire()
     imdb_id = generate_imdb_id_from_number(movie_id)
-    search_response = _get_movie_response(imdb_id)
+    search_response = await _get_movie_response(session, imdb_id)
+    semaphore.release()
     if search_response.status_code == '200':
         return None
     return MovieData.from_dict(search_response.json())
 
 
-def _get_movie_response(imdb_id):
-    return requests.get(OMDB_URL, params={'i': imdb_id, 'plot': 'full',
-                                          'r': 'json'})
+async def _get_movie_response(session, imdb_id):
+    return await session.get(OMDB_URL, params={'i': imdb_id, 'plot': 'full',
+                                               'r': 'json'})
 
 
 def generate_imdb_id_from_number(number):
@@ -55,15 +70,40 @@ def generate_imdb_id_from_number(number):
         raise ValueError('Provided parameter is not a number')
 
     if number <= 0 or len(str(number)) > IMDB_MAX_DIGITS:
-        raise ValueError('Negative or too big number provided.')
+        raise ValueError('Negative or too big number provided: {}'.format(number))
 
     return 'tt{:0>7}'.format(str(number))
 
 
+async def insert_movie_into_collection(collection, movie):
+    movie_present = await collection.find_one({'imdbid': movie.imdbid})
+    if movie_present:
+        logging.info('Movie is already in the database.')
+        return
+    else:
+        await collection.insert_one(movie.to_dict())
+
+
+async def download_movies_data(loop, collection, semaphore):
+    currently_parsed_movies = await collection.find().count()
+    async with aiohttp.ClientSession(loop=loop) as session:
+        for movie_id in range(currently_parsed_movies, currently_parsed_movies + 10):
+            m = await get_movie_by_id(session, movie_id, semaphore)
+            await insert_movie_into_collection(collection, m)
+
+
 def main():
-    for i in range(1, 10):
-        m = get_movie_by_id(i)
-        print(m)
+    client = motor.motor_asyncio.AsyncIOMotorClient()
+
+    movies_db = client.movies_db
+    movies_collection = movies_db.movies_collection
+
+
+    loop = asyncio.get_event_loop()
+    semaphore = asyncio.Semaphore(value=MAX_CONCURRENT_CONNECTIONS, loop=loop)
+    loop.run_until_complete(download_movies_data(loop,
+                                                 movies_collection,
+                                                 semaphore))
 
 
 if __name__ == '__main__':
