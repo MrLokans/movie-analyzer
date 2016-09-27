@@ -1,0 +1,14 @@
+aiohttp==1.0.2
+async-timeout==1.0.0
+chardet==2.3.0
+greenlet==0.4.10
+motor==0.6.2
+multidict==2.1.2
+numpy==1.11.1
+pandas==0.18.1
+pycares==2.1.0
+pymongo==2.8
+python-dateutil==2.5.3
+pytz==2016.6.1
+requests==2.11.1
+six==1.10.0
