@@ -89,8 +89,9 @@ async def download_movies_data(loop, collection, counter_collection, semaphore):
     currently_parsed_movies = await counter_collection.find_one({'name': 'movies'})
     if currently_parsed_movies and currently_parsed_movies != '0':
         currently_parsed_movies = int(currently_parsed_movies['count'])
+        counter_collection.insert({'name': 'movies', 'count': currently_parsed_movies})
     else:
-        currently_parsed_movies = await collection.find().count()
+        currently_parsed_movies = await collection.find().count() + 1
         counter_collection.update({'name': 'movies'},
                                   {'count': currently_parsed_movies})
 
