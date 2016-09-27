@@ -85,13 +85,23 @@ async def insert_movie_into_collection(collection, movie):
         await collection.insert(movie.to_dict())
 
 
-async def download_movies_data(loop, collection, semaphore):
-    currently_parsed_movies = await collection.find().count()
+async def download_movies_data(loop, collection, counter_collection, semaphore):
+    currently_parsed_movies = await counter_collection.find_one({'name': 'movies'})
+    if currently_parsed_movies and currently_parsed_movies != '0':
+        currently_parsed_movies = int(currently_parsed_movies['count'])
+    else:
+        currently_parsed_movies = await collection.find().count()
+        counter_collection.update({'name': 'movies'},
+                                  {'count': currently_parsed_movies})
+
     async with aiohttp.ClientSession(loop=loop) as session:
         for movie_id in range(currently_parsed_movies,
-                              currently_parsed_movies + 1000):
+                              currently_parsed_movies + 100):
             m = await get_movie_by_id(session, movie_id, semaphore)
             await insert_movie_into_collection(collection, m)
+
+            currently_parsed_movies += 1
+            await counter_collection.update({'name': 'movies'}, {'count': currently_parsed_movies})
 
 
 def main():
@@ -99,11 +109,13 @@ def main():
 
     movies_db = client.movies_db
     movies_collection = movies_db.movies_collection
+    counter_collection = movies_db.counter
 
     loop = asyncio.get_event_loop()
     semaphore = asyncio.Semaphore(value=MAX_CONCURRENT_CONNECTIONS, loop=loop)
     loop.run_until_complete(download_movies_data(loop,
                                                  movies_collection,
+                                                 counter_collection,
                                                  semaphore))
 
 
