@@ -99,7 +99,8 @@ async def download_movies_data(loop, collection, counter_collection):
         currently_parsed_movies = await extract_last_movie_id(collection)
 
     await counter_collection.update({'name': 'movies'},
-                                    {'count': currently_parsed_movies + 1},
+                                    {'count': currently_parsed_movies + 1,
+                                     'name': 'movies'},
                                     upsert=True)
     async with aiohttp.ClientSession(loop=loop) as session:
         for movie_id in range(currently_parsed_movies,
@@ -108,9 +109,8 @@ async def download_movies_data(loop, collection, counter_collection):
                 m = await get_movie_by_id(session, movie_id)
                 await insert_movie_into_collection(collection, m)
 
-                currently_parsed_movies += 1
                 await counter_collection.update({'name': 'movies'},
-                                                {'count': currently_parsed_movies},
+                                                {'$inc': {'count': 1}},
                                                 upsert=True)
             except Exception as e:
                 logging.exception("Unknown error occured.")
