@@ -63,8 +63,7 @@ async def _get_movie_response(session, imdb_id):
     payload = {
         'i': imdb_id, 'plot': 'full', 'r': 'json'
     }
-    async with session.get(OMDB_URL, params=payload) as resp:
-        return resp
+    return await session.get(OMDB_URL, params=payload)
 
 
 async def insert_movie_into_collection(collection, movie):
