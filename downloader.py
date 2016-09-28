@@ -4,8 +4,10 @@ import aiohttp
 import asyncio
 import motor.motor_asyncio
 
+import utils
+
 OMDB_URL = 'https://www.omdbapi.com/'
-IMDB_MAX_DIGITS = 7
+
 MAX_CONCURRENT_CONNECTIONS = 10
 
 logging.basicConfig(level=logging.INFO)
@@ -52,7 +54,7 @@ class MovieData(object):
 
 async def get_movie_by_id(session, movie_id, semaphore):
     # semaphore.acquire()
-    imdb_id = generate_imdb_id_from_number(movie_id)
+    imdb_id = utils.generate_imdb_id_from_number(movie_id)
     search_response = await _get_movie_response(session, imdb_id)
     # semaphore.release()
     json_movie = await search_response.json()
@@ -60,20 +62,11 @@ async def get_movie_by_id(session, movie_id, semaphore):
 
 
 async def _get_movie_response(session, imdb_id):
-    return await session.get(OMDB_URL, params={'i': imdb_id, 'plot': 'full',
-                                               'r': 'json'})
-
-
-def generate_imdb_id_from_number(number):
-    try:
-        int(number)
-    except:
-        raise ValueError('Provided parameter is not a number')
-
-    if number <= 0 or len(str(number)) > IMDB_MAX_DIGITS:
-        raise ValueError('Negative or too big number provided: {}'.format(number))
-
-    return 'tt{:0>7}'.format(str(number))
+    payload = {
+        'i': imdb_id, 'plot': 'full', 'r': 'json'
+    }
+    async with session.get(OMDB_URL, params=payload) as resp:
+        return resp
 
 
 async def insert_movie_into_collection(collection, movie):
@@ -85,16 +78,32 @@ async def insert_movie_into_collection(collection, movie):
         await collection.insert(movie.to_dict())
 
 
-async def download_movies_data(loop, collection, counter_collection, semaphore):
+async def extract_last_movie_id(movie_collection):
+    """Find the last movie in the collection,
+    extract its consequent number from the IMDB id, and update counter
+    if necessary."""
+    last_movie = None
+    cursor = movie_collection.find().sort('_id', -1).limit(1)
+
+    while (await cursor.fetch_next):
+        last_movie = cursor.next_object()
+
+    if last_movie is None:
+        return 0
+    last_id = utils.extract_id_from_imdbid(last_movie['imdbid'])
+    return int(last_id)
+
+
+async def download_movies_data(loop, collection, counter_collection):
     currently_parsed_movies = await counter_collection.find_one({'name': 'movies'})
     if currently_parsed_movies and currently_parsed_movies != '0':
         currently_parsed_movies = int(currently_parsed_movies['count'])
-        counter_collection.insert({'name': 'movies', 'count': currently_parsed_movies})
     else:
-        currently_parsed_movies = await collection.find().count() + 1
-        counter_collection.update({'name': 'movies'},
-                                  {'count': currently_parsed_movies})
+        currently_parsed_movies = await extract_last_movie_id(collection)
 
+    await counter_collection.update({'name': 'movies'},
+                                    {'count': currently_parsed_movies + 1},
+                                    upsert=True)
     async with aiohttp.ClientSession(loop=loop) as session:
         for movie_id in range(currently_parsed_movies,
                               currently_parsed_movies + 1000000):
@@ -118,11 +127,9 @@ def main():
     counter_collection = movies_db.counter
 
     loop = asyncio.get_event_loop()
-    semaphore = asyncio.Semaphore(value=MAX_CONCURRENT_CONNECTIONS, loop=loop)
     loop.run_until_complete(download_movies_data(loop,
                                                  movies_collection,
-                                                 counter_collection,
-                                                 semaphore))
+                                                 counter_collection))
 
 
 if __name__ == '__main__':
