@@ -52,11 +52,9 @@ class MovieData(object):
                         self.imdbid.encode('utf-8').decode('utf-8', errors='replace'))
 
 
-async def get_movie_by_id(session, movie_id, semaphore):
-    # semaphore.acquire()
+async def get_movie_by_id(session, movie_id):
     imdb_id = utils.generate_imdb_id_from_number(movie_id)
     search_response = await _get_movie_response(session, imdb_id)
-    # semaphore.release()
     json_movie = await search_response.json()
     return MovieData.from_dict(json_movie)
 
