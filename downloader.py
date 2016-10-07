@@ -1,6 +1,7 @@
 import logging
 
 import aiohttp
+from aiohttp.client_reqrep import ClientResponse
 import asyncio
 import motor.motor_asyncio
 
@@ -14,21 +15,24 @@ MAX_CONCURRENT_CONNECTIONS = 10
 logging.basicConfig(level=logging.INFO)
 
 
-async def get_movie_by_id(session, movie_id):
+async def get_movie_by_id(session: aiohttp.ClientSession,
+                          movie_id: int) -> MovieData:
     imdb_id = utils.generate_imdb_id_from_number(movie_id)
     search_response = await _get_movie_response(session, imdb_id)
     json_movie = await search_response.json()
     return MovieData.from_dict(json_movie)
 
 
-async def _get_movie_response(session, imdb_id):
+async def _get_movie_response(session: aiohttp.ClientSession,
+                              imdb_id: str) -> ClientResponse:
     payload = {
         'i': imdb_id, 'plot': 'full', 'r': 'json'
     }
     return await session.get(OMDB_URL, params=payload)
 
 
-async def insert_movie_into_collection(collection, movie):
+async def insert_movie_into_collection(collection,
+                                       movie: MovieData) -> None:
     movie_present = await collection.find_one({'imdbid': movie.imdbid})
     if movie_present and movie.imdbid != 'unknown':
         logging.info('Movie is already in the database.')
@@ -37,7 +41,7 @@ async def insert_movie_into_collection(collection, movie):
         await collection.insert(movie.to_dict())
 
 
-async def extract_last_movie_id(movie_collection):
+async def extract_last_movie_id(movie_collection) -> int:
     """Find the last movie in the collection,
     extract its consequent number from the IMDB id, and update counter
     if necessary."""
@@ -53,7 +57,8 @@ async def extract_last_movie_id(movie_collection):
     return int(last_id)
 
 
-async def download_movies_data(loop, collection, counter_collection):
+async def download_movies_data(loop: asyncio.AbstractEventLoop,
+                               collection, counter_collection) -> None:
     currently_parsed_movies = await counter_collection.find_one({'name': 'movies'})
     if currently_parsed_movies and currently_parsed_movies != '0':
         currently_parsed_movies = int(currently_parsed_movies['count'])
