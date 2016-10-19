@@ -1,7 +1,8 @@
 import re
 from collections import defaultdict
 
-RE_TITLE = r'^MV:\s*(?P<title>[^\n]+)\s+(\((?P<year>\d+)\))'
+RE_YEAR_PART = r'\((?P<year>(?:\d+|\?\?\?\?)(?:[\/IVXL]+)?\))'
+RE_TITLE = r'^MV:\s*(?P<title>[^\n]+)\s+' + RE_YEAR_PART + r'\s*(?P<episode>{.+})?'
 RE_TITLE = re.compile(RE_TITLE, re.MULTILINE)
 SPLITTER = "-------------------------------------------------------------------------------"
 
@@ -68,7 +69,8 @@ def parse_movie(s: str) -> dict:
     g = match.groupdict()
     title = g['title']
     year = g['year']
-    return {'title': title, 'year': year, 'episode': '',
+    episode = g['episode']
+    return {'title': title, 'year': year, 'episode': episode,
             'plots': parse_plot_lines(plot_lines)}
 
 
@@ -76,20 +78,13 @@ data = ""
 with open(fname, "r", encoding="latin-1") as f:
     data = f.read()
 
-# for r in RE_TITLE.finditer(data):
-#     print(r.groupdict())
-
 
 def main():
     for n, movie_chunk in enumerate(itersplit(data, sep=SPLITTER)):
         # Skip header
         if n == 0:
             continue
-        if n > 500:
-            break
         movie_data = parse_movie(movie_chunk)
-        print(movie_data)
-        print("*" * 10)
 
 
 if __name__ == '__main__':
